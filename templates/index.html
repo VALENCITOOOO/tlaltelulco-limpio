@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#176b45">
+  <title>Tlaltelulco Limpio | Reporte ciudadano</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="brand-mark">TL</div>
+      <div>
+        <p class="eyebrow">LA MAGDALENA TLALTELULCO, TLAXCALA</p>
+        <h1>Tlaltelulco Limpio</h1>
+        <p class="subtitle">Reporta los puntos donde se acumula basura y ayuda a mantener limpio nuestro municipio.</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="intro">
+      <span class="tag">REPORTE CIUDADANO</span>
+      <h2>¿Dónde hay basura acumulada?</h2>
+      <p>Completa los datos del lugar y, si puedes, adjunta una fotografía para identificar mejor el problema.</p>
+    </section>
+
+    <form id="reportForm" class="panel">
+      <div class="field">
+        <label for="calle">Calle o colonia <span>*</span></label>
+        <input id="calle" name="calle" required maxlength="160" placeholder="Ej. Avenida San Mauro">
+      </div>
+      <div class="field">
+        <label for="referencia">Puntos de referencia <span>*</span></label>
+        <input id="referencia" name="referencia" required maxlength="240" placeholder="Ej. Frente a la tienda o cerca del parque">
+      </div>
+      <div class="field">
+        <label for="descripcion">Descripción del problema <span>*</span></label>
+        <textarea id="descripcion" name="descripcion" required maxlength="1200" rows="4" placeholder="Describe qué tipo de residuos hay y qué tan grande es la acumulación..."></textarea>
+      </div>
+
+      <div class="field">
+        <label for="foto">Fotografía (opcional)</label>
+        <input id="foto" name="foto" type="file" accept="image/jpeg,image/png,image/webp">
+        <small>Formatos JPG, PNG o WEBP. Máximo 8 MB.</small>
+        <img id="preview" class="preview" alt="Vista previa de la fotografía" hidden>
+      </div>
+
+      <div class="location-box">
+        <div>
+          <strong>Ubicación GPS</strong>
+          <p id="gpsStatus">Puedes compartir tu ubicación para señalar el sitio del reporte.</p>
+        </div>
+        <button type="button" class="button secondary" id="gpsButton">Obtener ubicación</button>
+      </div>
+      <input type="hidden" name="latitud" id="latitud">
+      <input type="hidden" name="longitud" id="longitud">
+
+      <button class="button primary submit" id="submitButton" type="submit">Enviar reporte</button>
+      <div id="result" class="result" role="status" aria-live="polite"></div>
+      <p class="privacy">La ubicación solo se obtiene si presionas el botón y autorizas el permiso del navegador.</p>
+    </form>
+
+    <section class="bottom-note">
+      <h3>Gracias por participar</h3>
+      <p>Tu reporte ayuda a identificar las zonas que necesitan atención y limpieza.</p>
+    </section>
+  </main>
+  <footer>Proyecto ciudadano · La Magdalena Tlaltelulco, Tlaxcala</footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

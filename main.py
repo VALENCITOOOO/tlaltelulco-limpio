@@ -16,7 +16,7 @@ REPORTS_FILE = DATA_DIR / "reportes.json"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # IMPORTANTE: sustituye este número por el WhatsApp real del Ayuntamiento.
-WHATSAPP_NUMBER = os.getenv("WHATSAPP_NUMBER", "522460000000")
+WHATSAPP_NUMBER = os.getenv("WHATSAPP_NUMBER", "525650506533")
 
 app = FastAPI(title="Tlaltelulco Limpio")
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")

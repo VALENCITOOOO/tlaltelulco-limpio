@@ -1,112 +1,259 @@
-import os
-import json
-import uuid
-from datetime import datetime
-from pathlib import Path
-from urllib.parse import quote
 
-from fastapi import FastAPI, Request, Form, UploadFile, File
+import os
+import sqlite3
+import uuid
+from pathlib import Path
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, File, Form, UploadFile, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from detector import detectar_basura
+from starlette.concurrency import run_in_threadpool
 
-APP_DIR = Path(__file__).parent
-DATA_DIR = Path(os.getenv("DATA_DIR", APP_DIR / "data"))
+
+
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
 UPLOAD_DIR = DATA_DIR / "uploads"
-REPORTS_FILE = DATA_DIR / "reportes.json"
+DB_PATH = DATA_DIR / "reportes.db"
+
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# IMPORTANTE: sustituye este número por el WhatsApp real del Ayuntamiento.
-WHATSAPP_NUMBER = os.getenv("WHATSAPP_NUMBER", "525650506533")
+app = FastAPI(title="Tlaltelulco Limpio - Reportes ciudadanos")
 
-app = FastAPI(title="Tlaltelulco Limpio")
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.mount(
+    "/uploads",
+    StaticFiles(directory=str(UPLOAD_DIR)),
+    name="uploads"
+)
 
-PAGE = """<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tlaltelulco Limpio | Reporte ciudadano</title>
-<style>
-:root{font-family:Arial,sans-serif;color:#18251f;background:#f2f6f2}
-*{box-sizing:border-box}body{margin:0}
-header{background:#176b45;color:white;padding:28px 18px;text-align:center}
-header h1{margin:0 0 8px;font-size:clamp(25px,5vw,36px)}
-header p{margin:0;color:#e4f4e9}
-main{max-width:680px;margin:28px auto;padding:0 16px 35px}
-.card{background:white;border-radius:16px;padding:24px;box-shadow:0 5px 22px #163b2514}
-.notice{background:#eaf5ed;border-left:4px solid #258653;padding:12px 14px;border-radius:7px;margin-bottom:20px;font-size:14px}
-label{display:block;font-weight:700;margin:16px 0 7px}
-input,textarea{width:100%;padding:13px;border:1px solid #cbd8ce;border-radius:9px;font:inherit;background:#fff}
-textarea{min-height:90px;resize:vertical}
-button{width:100%;border:0;border-radius:9px;padding:15px;background:#18864f;color:white;font-size:16px;font-weight:700;margin-top:20px;cursor:pointer}
-button:disabled{opacity:.6;cursor:wait}
-.small{font-size:13px;color:#5b6c60;line-height:1.5}
-#status{margin-top:15px;line-height:1.5;overflow-wrap:anywhere}
-footer{text-align:center;color:#718078;font-size:12px;padding:15px}
-</style>
-</head>
-<body>
-<header><h1>🌱 Tlaltelulco Limpio</h1>
-<p>Reporte ciudadano de acumulación de basura</p></header>
-<main><section class="card">
-<div class="notice"><b>Zona de cobertura:</b> La Magdalena Tlaltelulco, Tlaxcala.<br>
-Ayúdanos a mantener limpias nuestras calles reportando puntos con basura.</div>
-<form id="reportForm">
-<label for="calle">Calle o colonia *</label>
-<input id="calle" name="calle" placeholder="Ej. Avenida San Mauro" required>
-<label for="referencia">Punto de referencia *</label>
-<input id="referencia" name="referencia" placeholder="Ej. Frente a la tienda o cerca del parque" required>
-<label for="descripcion">Descripción del problema</label>
-<textarea id="descripcion" name="descripcion" placeholder="Describe dónde y qué tipo de basura hay..."></textarea>
-<label for="foto">Fotografía (opcional)</label>
-<input id="foto" name="foto" type="file" accept="image/*">
-<p class="small">Si autorizas el acceso a la ubicación, el reporte incluirá las coordenadas de tu dispositivo.</p>
-<input type="hidden" id="latitud" name="latitud">
-<input type="hidden" id="longitud" name="longitud">
-<button id="send" type="submit">Enviar reporte por WhatsApp</button>
-</form>
-<div id="status" role="status"></div>
-</section></main>
-<footer>Servicios Municipales · La Magdalena Tlaltelulco, Tlaxcala</footer>
-<script>
-const form=document.getElementById('reportForm');
-const statusBox=document.getElementById('status');
-form.addEventListener('submit', async (event)=>{
- event.preventDefault();
- const button=document.getElementById('send');
- button.disabled=true; button.textContent='Preparando reporte...';
- const sendReport=()=>{
-   const data=new FormData(form);
-   const calle=data.get('calle').trim(), referencia=data.get('referencia').trim();
-   const descripcion=data.get('descripcion').trim() || 'Sin detalles adicionales';
-   const lat=data.get('latitud'), lon=data.get('longitud');
-   let message=`NUEVO REPORTE DE BASURA\\n\\nMunicipio: La Magdalena Tlaltelulco\\nCalle / Colonia: ${calle}\\nReferencias: ${referencia}\\nDetalles: ${descripcion}`;
-   if(lat && lon) message+=`\\nUbicación: https://maps.google.com/?q=${lat},${lon}`;
-   const photo=data.get('foto');
-   if(photo && photo.size) message+='\\nSe seleccionó una fotografía. Adjuntarla manualmente en WhatsApp.';
-   const phone='__PHONE__';
-   const url=`https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-   statusBox.innerHTML='Se abrirá WhatsApp con el texto del reporte. Si seleccionaste una foto, tendrás que adjuntarla manualmente. Si WhatsApp no abre, <a target="_blank" rel="noopener" href="'+url+'">pulsa aquí</a>.';
-   window.open(url,'_blank','noopener');
-   button.disabled=false; button.textContent='Enviar reporte por WhatsApp';
- };
- if(navigator.geolocation){
-   navigator.geolocation.getCurrentPosition(pos=>{
-     document.getElementById('latitud').value=pos.coords.latitude;
-     document.getElementById('longitud').value=pos.coords.longitude;
-     sendReport();
-   },()=>sendReport(),{timeout:5000});
- }else sendReport();
-});
-</script>
-</body></html>"""
-PAGE = PAGE.replace("__PHONE__", WHATSAPP_NUMBER)
+app.mount(
+    "/static",
+    StaticFiles(directory=str(BASE_DIR / "static")),
+    name="static"
+)
+
+templates = Jinja2Templates(
+    directory=str(BASE_DIR / "templates")
+)
+
+
+def conectar():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def inicializar_db():
+    with conectar() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reportes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT NOT NULL,
+                calle TEXT NOT NULL,
+                referencia TEXT NOT NULL,
+                descripcion TEXT NOT NULL,
+                latitud REAL,
+                longitud REAL,
+                foto TEXT
+            )
+        """)
+
+
+inicializar_db()
+
 
 @app.get("/", response_class=HTMLResponse)
-async def home():
-    return PAGE
+async def inicio(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html"
+    )
 
-@app.get("/health")
-async def health():
-    return {"status": "ok", "app": "Tlaltelulco Limpio"}
+
+@app.post("/api/validar-foto")
+async def validar_foto(foto: UploadFile = File(...)):
+
+    extension = Path(foto.filename or "").suffix.lower()
+
+    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Formato de imagen no permitido."
+        )
+
+    contenido = await foto.read(8 * 1024 * 1024 + 1)
+
+    if len(contenido) > 8 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="La imagen supera los 8 MB."
+        )
+
+    try:
+        analisis = await run_in_threadpool(
+            detectar_basura, contenido
+        )
+
+        return {
+            "aceptada": analisis["aceptada"],
+            "basura": analisis["basura"],
+            "no_basura": analisis["no_basura"]
+        }
+
+    except (OSError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo leer la fotografia."
+        )
+
+    except Exception as error:
+        print(f"Error de IA: {error}", flush=True)
+
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo analizar la fotografia."
+        )
+
+
+
+@app.post("/api/reportar")
+async def reportar_basura(
+    calle: str = Form(...),
+    referencia: str = Form(...),
+    descripcion: str = Form(...),
+    latitud: str = Form(""),
+    longitud: str = Form(""),
+    foto: UploadFile | None = File(None)
+):
+
+    calle = calle.strip()
+    referencia = referencia.strip()
+    descripcion = descripcion.strip()
+
+    if not calle or not referencia or not descripcion:
+        raise HTTPException(
+            status_code=400,
+            detail="Completa calle, referencias y descripción."
+        )
+
+    try:
+        lat = float(latitud) if latitud.strip() else None
+        lon = float(longitud) if longitud.strip() else None
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Las coordenadas no son válidas."
+        )
+
+    # Fotografia obligatoria
+    if not foto or not foto.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes seleccionar una fotografía de la basura."
+        )
+
+    extension = Path(foto.filename).suffix.lower()
+
+    permitidas = {".jpg", ".jpeg", ".png", ".webp"}
+
+    if extension not in permitidas:
+        raise HTTPException(
+            status_code=400,
+            detail="La fotografía debe ser JPG, PNG o WEBP."
+        )
+
+    contenido = await foto.read(8 * 1024 * 1024 + 1)
+
+    if len(contenido) > 8 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="La fotografía no debe superar 8 MB."
+        )
+
+    # Analizar fotografia con inteligencia artificial
+    try:
+        analisis = await run_in_threadpool(
+            detectar_basura,
+            contenido
+        )
+
+    except (OSError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo leer la fotografía."
+        )
+
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="El detector de basura no está disponible."
+        )
+
+    # Rechazar fotografias incorrectas
+    if not analisis["aceptada"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Imagen rechazada. La inteligencia artificial "
+                "no pudo confirmar basura acumulada en la calle. "
+                f"Confianza: {analisis['basura']}%. "
+                "Selecciona otra fotografía."
+            )
+        )
+
+    # Guardar fotografia aceptada
+    foto_nombre = f"{uuid.uuid4().hex}{extension}"
+
+    (UPLOAD_DIR / foto_nombre).write_bytes(contenido)
+
+    fecha = datetime.now(
+        timezone.utc
+    ).astimezone().isoformat(timespec="seconds")
+
+    with conectar() as conn:
+        cursor = conn.execute("""
+            INSERT INTO reportes (
+                fecha, calle, referencia,
+                descripcion, latitud, longitud, foto
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            fecha,
+            calle,
+            referencia,
+            descripcion,
+            lat,
+            lon,
+            foto_nombre
+        ))
+
+        reporte_id = cursor.lastrowid
+
+    return JSONResponse({
+        "ok": True,
+        "id": reporte_id,
+        "confianza": analisis["basura"],
+        "mensaje": (
+            f"Basura detectada con {analisis['basura']}% "
+            f"de confianza. Reporte #{reporte_id} guardado."
+        )
+    })
+
+
+@app.get("/api/reportes")
+async def listar_reportes():
+
+    with conectar() as conn:
+        rows = conn.execute("""
+            SELECT id, fecha, calle, referencia,
+            descripcion, latitud, longitud, foto
+            FROM reportes
+            ORDER BY id DESC LIMIT 100
+        """).fetchall()
+
+    return [dict(r) for r in rows]
+
